@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpsAgent } from 'agentkeepalive';
-import axios, { AxiosRequestConfig } from 'axios';
+import axios from 'axios';
 import * as fs from 'fs';
 
 @Injectable()
@@ -17,85 +17,89 @@ export class PixService {
         : this.apiStaging;
   }
 
-  private getHttpsAgent(): HttpsAgent {
+  getToken = async () => {
     const certificado = fs.readFileSync(
       this.configService.get('GN_CERTIFICADO'),
     );
-
-    return new HttpsAgent({
-      pfx: certificado,
-      passphrase: '',
-    });
-  }
-
-  private getAuthHeader(): string {
     const credenciais = {
       client_id: this.configService.get('GN_CLIENT_ID'),
       client_secret: this.configService.get('GN_CLIENT_SECRET'),
     };
+    const data = JSON.stringify({ grant_type: 'client_credentials' });
     const dataCredenciais =
       credenciais.client_id + ':' + credenciais.client_secret;
     const auth = Buffer.from(dataCredenciais).toString('base64');
-    return 'Basic ' + auth;
-  }
 
-  private async sendRequest(config: AxiosRequestConfig): Promise<any> {
-    const agent = this.getHttpsAgent();
-    const headers = {
-      Authorization: this.getAuthHeader(),
-      'Content-Type': 'application/json',
-    };
+    const agent = new HttpsAgent({
+      pfx: certificado,
+      passphrase: '',
+    });
 
-    const httpsConfig: AxiosRequestConfig = {
-      ...config,
-      httpsAgent: agent,
-      headers,
-    };
-
-    const response = await axios(httpsConfig);
-    return response.data;
-  }
-
-  async getToken(): Promise<any> {
-    const data = JSON.stringify({ grant_type: 'client_credentials' });
-    const config: AxiosRequestConfig = {
+    const config = {
       method: 'POST',
       url: this.baseURL + '/oauth/token',
-      data,
+      headers: {
+        Authorization: 'Basic ' + auth,
+        'Content-Type': 'application/json',
+      },
+      httpsAgent: agent,
+      data: data,
     };
 
-    return await this.sendRequest(config);
-  }
+    const result = await axios(config);
+    return result.data;
+  };
 
-  async createCharge(access_token: string, chargeData: any): Promise<any> {
+  createCharge = async (access_token, chargeData) => {
+    const certificado = fs.readFileSync(
+      this.configService.get('GN_CERTIFICADO'),
+    );
     const data = JSON.stringify(chargeData);
-    const config: AxiosRequestConfig = {
+
+    const agent = new HttpsAgent({
+      pfx: certificado,
+      passphrase: '',
+    });
+
+    const config = {
       method: 'POST',
       url: this.baseURL + '/v2/cob',
       headers: {
         Authorization: 'Bearer ' + access_token,
         'Content-Type': 'application/json',
       },
-      data,
+      httpsAgent: agent,
+      data: data,
     };
+    const result = await axios(config);
+    return result.data;
+  };
 
-    return await this.sendRequest(config);
-  }
+  getLoc = async (access_token, locId) => {
+    const certificado = fs.readFileSync(
+      this.configService.get('GN_CERTIFICADO'),
+    );
 
-  async getLoc(access_token: string, locId: string): Promise<any> {
-    const config: AxiosRequestConfig = {
+    const agent = new HttpsAgent({
+      pfx: certificado,
+      passphrase: '',
+    });
+
+    const config = {
       method: 'GET',
       url: this.baseURL + '/v2/loc/' + locId + '/qrcode',
       headers: {
         Authorization: 'Bearer ' + access_token,
         'Content-Type': 'application/json',
       },
+      httpsAgent: agent,
     };
 
-    return await this.sendRequest(config);
-  }
+    const result = await axios(config);
+    return result.data;
+  };
 
-  async run(): Promise<void> {
+  run = async () => {
     const chave = this.configService.get('CHAVE_PIX');
     const { access_token } = await this.getToken();
     const chargeData = {
@@ -109,13 +113,11 @@ export class PixService {
       valor: {
         original: '130.50',
       },
-      chave, // Pelo app do gerenciaNet
+      chave,
       solicitacaoPagador: 'Cobrança dos serviços prestados',
     };
     const charge = await this.createCharge(access_token, chargeData);
-    console.log(charge);
-    // const qrcode = await this.getLoc(access_token, charge.loc.id);
-
-    return null;
-  }
+    const qrcode = await this.getLoc(access_token, charge.loc.id);
+    return qrcode;
+  };
 }
